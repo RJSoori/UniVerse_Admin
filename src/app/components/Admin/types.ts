@@ -18,6 +18,9 @@ export interface JobHubProfile extends BaseProfile {
     contactNo: string;
     brNumber?: string;
     nicPassport?: string;
+    businessRegistrationUrl?: string;
+    orgLogoUrl?: string;
+    authLetterUrl?: string;
 }
 
 export interface SellerProfile extends BaseProfile {
