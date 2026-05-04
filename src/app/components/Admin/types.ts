@@ -1,6 +1,6 @@
 export type AccountStatus = "pending" | "verified" | "rejected";
 export type ModuleType = "jobhub" | "marketplace";
-export type TabType = "verifications" | "registered" | "reported";
+export type TabType = "verifications" | "registered" | "jobs" | "reported";
 
 export interface BaseProfile {
     id: string;
@@ -35,4 +35,17 @@ export interface ReportedItem {
     reason: string;
     date: string;
     status: "open" | "resolved";
+}
+
+export interface JobItem {
+    id: number;
+    title: string;
+    description: string;
+    externalApplicationUrl: string;
+    recruiter: {
+        id: number;
+        companyName: string;
+        email: string;
+    };
+    status: "PENDING" | "APPROVED" | "REJECTED";
 }

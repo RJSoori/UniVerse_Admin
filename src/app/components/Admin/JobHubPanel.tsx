@@ -15,13 +15,14 @@ import {
   Check,
   X,
 } from "lucide-react";
-import type { TabType, JobHubProfile, ReportedItem } from "./types";
+import type { TabType, JobHubProfile, ReportedItem, JobItem } from "./types";
 
 interface RawRecruiter {
   id: number;
   companyName: string;
   email: string;
   contactPerson: string;
+  accountType?: "corporate" | "individual";
   businessRegistrationUrl?: string;
   orgLogoUrl?: string;
   authLetterUrl?: string;
@@ -31,15 +32,23 @@ interface RawRecruiter {
 
 const mapRecruiter = (recruiter: RawRecruiter): JobHubProfile => {
   const status = recruiter.status?.toLowerCase() as JobHubProfile["status"];
+  const accountType =
+    recruiter.accountType ||
+    (recruiter.businessRegistrationUrl ? "corporate" : "individual");
   return {
     id: `${recruiter.id}`,
     status: status === "verified" || status === "rejected" ? status : "pending",
-    legalName: recruiter.companyName || "Unknown Company",
+    legalName:
+      accountType === "individual"
+        ? recruiter.contactPerson ||
+          recruiter.companyName ||
+          "Unknown Individual"
+        : recruiter.companyName || "Unknown Company",
     email: recruiter.email,
     submittedAt: recruiter.registeredAt
       ? new Date(recruiter.registeredAt).toLocaleDateString()
       : "Unknown",
-    accountType: recruiter.businessRegistrationUrl ? "corporate" : "individual",
+    accountType,
     url: recruiter.businessRegistrationUrl || recruiter.orgLogoUrl || "N/A",
     hqLocation: "Not provided",
     overview: recruiter.contactPerson
@@ -59,11 +68,17 @@ const mapRecruiter = (recruiter: RawRecruiter): JobHubProfile => {
 export function JobHubPanel() {
   const [activeTab, setActiveTab] = useState<TabType>("verifications");
   const [profiles, setProfiles] = useState<JobHubProfile[]>([]);
+  const [jobs, setJobs] = useState<JobItem[]>([]);
   const [reports, setReports] = useState<ReportedItem[]>([]);
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
   useEffect(() => {
-    fetch("http://localhost:8080/api/jobs/recruiters")
+    const token = localStorage.getItem("adminToken");
+    fetch("http://localhost:8080/api/jobs/recruiters", {
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    })
       .then((response) => {
         if (!response.ok) {
           throw new Error(`Failed to fetch recruiters: ${response.status}`);
@@ -76,8 +91,28 @@ export function JobHubPanel() {
       });
   }, []);
 
+  useEffect(() => {
+    const token = localStorage.getItem("adminToken");
+    fetch("http://localhost:8080/api/jobs/admin/pending", {
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    })
+      .then((response) => {
+        if (!response.ok) {
+          throw new Error(`Failed to fetch jobs: ${response.status}`);
+        }
+        return response.json();
+      })
+      .then((data: JobItem[]) => setJobs(data))
+      .catch((error) => {
+        console.error(error);
+      });
+  }, []);
+
   const pendingCount = profiles.filter((p) => p.status === "pending").length;
   const verifiedCount = profiles.filter((p) => p.status === "verified").length;
+  const jobsCount = jobs.length;
   const reportsCount = reports.filter((r) => r.status === "open").length;
 
   const updateStatus = async (
@@ -85,10 +120,14 @@ export function JobHubPanel() {
     status: "pending" | "verified" | "rejected",
   ) => {
     try {
+      const token = localStorage.getItem("adminToken");
       const response = await fetch(
         `http://localhost:8080/api/jobs/recruiters/${id}/verify?status=${status.toUpperCase()}`,
         {
           method: "PUT",
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
         },
       );
       if (!response.ok) {
@@ -100,7 +139,12 @@ export function JobHubPanel() {
       setExpandedId(null);
       // Refresh data to ensure consistency with backend
       setTimeout(() => {
-        fetch("http://localhost:8080/api/jobs/recruiters")
+        const token = localStorage.getItem("adminToken");
+        fetch("http://localhost:8080/api/jobs/recruiters", {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        })
           .then((response) => {
             if (!response.ok) {
               throw new Error(`Failed to fetch recruiters: ${response.status}`);
@@ -125,6 +169,54 @@ export function JobHubPanel() {
     setReports((prev) =>
       prev.map((r) => (r.id === id ? { ...r, status: "resolved" } : r)),
     );
+  };
+
+  const handleApproveJob = async (id: number) => {
+    try {
+      const token = localStorage.getItem("adminToken");
+      const response = await fetch(
+        `http://localhost:8080/api/jobs/admin/${id}/approve`,
+        {
+          method: "PUT",
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        },
+      );
+      if (!response.ok) {
+        throw new Error(`Failed to approve job: ${response.status}`);
+      }
+      setJobs((prev) => prev.filter((job) => job.id !== id));
+    } catch (error) {
+      console.error(error);
+      alert(
+        "Unable to approve job. Check the backend connection and try again.",
+      );
+    }
+  };
+
+  const handleRejectJob = async (id: number) => {
+    try {
+      const token = localStorage.getItem("adminToken");
+      const response = await fetch(
+        `http://localhost:8080/api/jobs/admin/${id}/reject`,
+        {
+          method: "PUT",
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        },
+      );
+      if (!response.ok) {
+        throw new Error(`Failed to reject job: ${response.status}`);
+      }
+      setJobs((prev) => prev.filter((job) => job.id !== id));
+    } catch (error) {
+      console.error(error);
+      alert(
+        "Unable to reject job. Check the backend connection and try again.",
+      );
+    }
   };
 
   return (
@@ -167,6 +259,25 @@ export function JobHubPanel() {
                 Registered Accounts
               </p>
               <p className="text-3xl font-black">{verifiedCount}</p>
+            </div>
+          </CardContent>
+        </Card>
+        <Card
+          className={cn(
+            "cursor-pointer transition-all hover:border-primary/50",
+            activeTab === "jobs" && "border-primary ring-1 ring-primary",
+          )}
+          onClick={() => setActiveTab("jobs")}
+        >
+          <CardContent className="p-6 flex items-center gap-4">
+            <div className="p-3 rounded-xl bg-blue-50">
+              <FileText className="text-blue-500" size={24} />
+            </div>
+            <div>
+              <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest">
+                Pending Jobs
+              </p>
+              <p className="text-3xl font-black">{jobsCount}</p>
             </div>
           </CardContent>
         </Card>
@@ -267,6 +378,75 @@ export function JobHubPanel() {
                     </div>
                   </div>
                 ))
+            ))}
+
+          {/* Render Jobs */}
+          {activeTab === "jobs" &&
+            (jobs.length === 0 ? (
+              <div className="text-center text-muted-foreground py-10 font-medium">
+                No pending jobs for review.
+              </div>
+            ) : (
+              jobs.map((job) => (
+                <div
+                  key={job.id}
+                  className="border border-blue-100 bg-blue-50/30 rounded-xl p-4 flex justify-between items-start"
+                >
+                  <div className="flex-1">
+                    <div className="flex items-center gap-2 mb-2">
+                      <Badge
+                        variant="secondary"
+                        className="text-[10px] uppercase font-bold"
+                      >
+                        Job #{job.id}
+                      </Badge>
+                      <span className="font-bold text-foreground">
+                        {job.title}
+                      </span>
+                    </div>
+                    <p className="text-sm text-muted-foreground mb-2">
+                      {job.description}
+                    </p>
+                    <p className="text-xs text-muted-foreground">
+                      Posted by {job.recruiter.companyName} (
+                      {job.recruiter.email})
+                    </p>
+                    <p className="text-xs text-muted-foreground">
+                      Application URL: {job.externalApplicationUrl}
+                    </p>
+                  </div>
+                  <div className="flex gap-2 ml-4">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="rounded-xl"
+                      onClick={() =>
+                        window.open(job.externalApplicationUrl, "_blank")
+                      }
+                    >
+                      View Application
+                    </Button>
+                    <Button
+                      variant="default"
+                      size="sm"
+                      className="rounded-xl bg-green-600 hover:bg-green-700"
+                      onClick={() => handleApproveJob(job.id)}
+                    >
+                      <Check className="w-4 h-4 mr-1" />
+                      Approve
+                    </Button>
+                    <Button
+                      variant="destructive"
+                      size="sm"
+                      className="rounded-xl"
+                      onClick={() => handleRejectJob(job.id)}
+                    >
+                      <X className="w-4 h-4 mr-1" />
+                      Reject
+                    </Button>
+                  </div>
+                </div>
+              ))
             ))}
 
           {/* Render Profiles */}
