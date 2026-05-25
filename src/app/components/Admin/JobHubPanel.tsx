@@ -22,19 +22,24 @@ interface RawRecruiter {
   companyName: string;
   email: string;
   contactPerson: string;
-  accountType?: "corporate" | "individual";
+  accountType?: "corporate" | "individual" | "company";
   businessRegistrationUrl?: string;
   orgLogoUrl?: string;
   authLetterUrl?: string;
   status: string;
   registeredAt?: string;
+  // For individuals
+  profilePictureUrl?: string;
+  idDocumentUrl?: string;
 }
 
 const mapRecruiter = (recruiter: RawRecruiter): JobHubProfile => {
   const status = recruiter.status?.toLowerCase() as JobHubProfile["status"];
-  const accountType =
+  const rawAccountType =
     recruiter.accountType ||
     (recruiter.businessRegistrationUrl ? "corporate" : "individual");
+  const accountType =
+    rawAccountType === "company" ? "corporate" : rawAccountType;
   return {
     id: `${recruiter.id}`,
     status: status === "verified" || status === "rejected" ? status : "pending",
@@ -49,7 +54,7 @@ const mapRecruiter = (recruiter: RawRecruiter): JobHubProfile => {
       ? new Date(recruiter.registeredAt).toLocaleDateString()
       : "Unknown",
     accountType,
-    url: recruiter.businessRegistrationUrl || recruiter.orgLogoUrl || "N/A",
+    url: "N/A",
     hqLocation: "Not provided",
     overview: recruiter.contactPerson
       ? `Contact person: ${recruiter.contactPerson}`
@@ -62,6 +67,8 @@ const mapRecruiter = (recruiter: RawRecruiter): JobHubProfile => {
     businessRegistrationUrl: recruiter.businessRegistrationUrl,
     orgLogoUrl: recruiter.orgLogoUrl,
     authLetterUrl: recruiter.authLetterUrl,
+    profilePictureUrl: recruiter.profilePictureUrl,
+    idDocumentUrl: recruiter.idDocumentUrl,
   };
 };
 
@@ -73,22 +80,36 @@ export function JobHubPanel() {
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
   useEffect(() => {
-    const token = localStorage.getItem("adminToken");
-    fetch("http://localhost:8080/api/jobs/recruiters", {
-      headers: {
-        Authorization: `Bearer ${token}`,
-      },
-    })
-      .then((response) => {
-        if (!response.ok) {
-          throw new Error(`Failed to fetch recruiters: ${response.status}`);
-        }
-        return response.json();
+    let isActive = true;
+    const fetchRecruiters = () => {
+      const token = localStorage.getItem("adminToken");
+      if (!token) return;
+      fetch("http://localhost:8080/api/jobs/recruiters", {
+        headers: { Authorization: `Bearer ${token}` },
       })
-      .then((data: RawRecruiter[]) => setProfiles(data.map(mapRecruiter)))
-      .catch((error) => {
-        console.error(error);
-      });
+        .then((response) => {
+          if (!response.ok) {
+            throw new Error(`Failed to fetch recruiters: ${response.status}`);
+          }
+          return response.json();
+        })
+        .then((data: RawRecruiter[]) => {
+          if (!isActive) return;
+          setProfiles(data.map(mapRecruiter));
+        })
+        .catch((error) => {
+          console.error(error);
+        });
+    };
+
+    // Initial fetch
+    fetchRecruiters();
+    // Poll every 5 seconds for updates
+    const interval = setInterval(fetchRecruiters, 5000);
+    return () => {
+      isActive = false;
+      clearInterval(interval);
+    };
   }, []);
 
   useEffect(() => {
@@ -545,12 +566,17 @@ export function JobHubPanel() {
                                 <div className="font-medium">
                                   {profile.contactNo}
                                 </div>
-                                <div className="text-muted-foreground">
-                                  Business URL:
-                                </div>
-                                <div className="font-medium text-primary hover:underline">
-                                  {profile.url}
-                                </div>
+                                {profile.accountType === "corporate" &&
+                                  profile.url !== "N/A" && (
+                                    <>
+                                      <div className="text-muted-foreground">
+                                        Business URL:
+                                      </div>
+                                      <div className="font-medium text-primary hover:underline">
+                                        {profile.url}
+                                      </div>
+                                    </>
+                                  )}
                                 <div className="text-muted-foreground">
                                   HQ Location:
                                 </div>
@@ -590,65 +616,69 @@ export function JobHubPanel() {
                                 <ImageIcon size={16} /> Provided Assets
                               </h4>
                               <div className="flex flex-col gap-3">
-                                {profile.orgLogoUrl ? (
-                                  <Button
-                                    variant="outline"
-                                    className="justify-start h-12 rounded-xl bg-white border-primary/20 hover:bg-primary/5"
-                                    onClick={() =>
-                                      window.open(profile.orgLogoUrl, "_blank")
-                                    }
-                                  >
-                                    <ImageIcon
-                                      className="mr-3 text-primary"
-                                      size={18}
-                                    />{" "}
-                                    View Organization Logo
-                                  </Button>
-                                ) : (
-                                  <Button
-                                    disabled
-                                    variant="outline"
-                                    className="justify-start h-12 rounded-xl bg-gray-100"
-                                  >
-                                    <ImageIcon
-                                      className="mr-3 text-gray-400"
-                                      size={18}
-                                    />{" "}
-                                    Organization Logo (Not Provided)
-                                  </Button>
-                                )}
-                                {profile.authLetterUrl ? (
-                                  <Button
-                                    variant="outline"
-                                    className="justify-start h-12 rounded-xl bg-white border-primary/20 hover:bg-primary/5"
-                                    onClick={() =>
-                                      window.open(
-                                        profile.authLetterUrl,
-                                        "_blank",
-                                      )
-                                    }
-                                  >
-                                    <FileText
-                                      className="mr-3 text-primary"
-                                      size={18}
-                                    />{" "}
-                                    View Authorization Letter
-                                  </Button>
-                                ) : (
-                                  <Button
-                                    disabled
-                                    variant="outline"
-                                    className="justify-start h-12 rounded-xl bg-gray-100"
-                                  >
-                                    <FileText
-                                      className="mr-3 text-gray-400"
-                                      size={18}
-                                    />{" "}
-                                    Authorization Letter (Not Provided)
-                                  </Button>
-                                )}
+                                {/* Corporate Assets */}
                                 {profile.accountType === "corporate" && (
                                   <>
+                                    {profile.orgLogoUrl ? (
+                                      <Button
+                                        variant="outline"
+                                        className="justify-start h-12 rounded-xl bg-white border-primary/20 hover:bg-primary/5"
+                                        onClick={() =>
+                                          window.open(
+                                            profile.orgLogoUrl,
+                                            "_blank",
+                                          )
+                                        }
+                                      >
+                                        <ImageIcon
+                                          className="mr-3 text-primary"
+                                          size={18}
+                                        />{" "}
+                                        View Organization Logo
+                                      </Button>
+                                    ) : (
+                                      <Button
+                                        disabled
+                                        variant="outline"
+                                        className="justify-start h-12 rounded-xl bg-gray-100"
+                                      >
+                                        <ImageIcon
+                                          className="mr-3 text-gray-400"
+                                          size={18}
+                                        />{" "}
+                                        Organization Logo (Not Provided)
+                                      </Button>
+                                    )}
+                                    {profile.authLetterUrl ? (
+                                      <Button
+                                        variant="outline"
+                                        className="justify-start h-12 rounded-xl bg-white border-primary/20 hover:bg-primary/5"
+                                        onClick={() =>
+                                          window.open(
+                                            profile.authLetterUrl,
+                                            "_blank",
+                                          )
+                                        }
+                                      >
+                                        <FileText
+                                          className="mr-3 text-primary"
+                                          size={18}
+                                        />{" "}
+                                        View Authorization Letter
+                                      </Button>
+                                    ) : (
+                                      <Button
+                                        disabled
+                                        variant="outline"
+                                        className="justify-start h-12 rounded-xl bg-gray-100"
+                                      >
+                                        <FileText
+                                          className="mr-3 text-gray-400"
+                                          size={18}
+                                        />{" "}
+                                        Authorization Letter (Not Provided)
+                                      </Button>
+                                    )}
                                     {profile.businessRegistrationUrl ? (
                                       <Button
                                         variant="outline"
@@ -677,6 +707,71 @@ export function JobHubPanel() {
                                           size={18}
                                         />{" "}
                                         BR Certificate (Not Provided)
+                                      </Button>
+                                    )}
+                                  </>
+                                )}
+                                {/* Individual Assets */}
+                                {profile.accountType === "individual" && (
+                                  <>
+                                    {profile.profilePictureUrl ? (
+                                      <Button
+                                        variant="outline"
+                                        className="justify-start h-12 rounded-xl bg-white border-primary/20 hover:bg-primary/5"
+                                        onClick={() =>
+                                          window.open(
+                                            profile.profilePictureUrl,
+                                            "_blank",
+                                          )
+                                        }
+                                      >
+                                        <ImageIcon
+                                          className="mr-3 text-primary"
+                                          size={18}
+                                        />{" "}
+                                        View Profile Picture
+                                      </Button>
+                                    ) : (
+                                      <Button
+                                        disabled
+                                        variant="outline"
+                                        className="justify-start h-12 rounded-xl bg-gray-100"
+                                      >
+                                        <ImageIcon
+                                          className="mr-3 text-gray-400"
+                                          size={18}
+                                        />{" "}
+                                        Profile Picture (Not Provided)
+                                      </Button>
+                                    )}
+                                    {profile.idDocumentUrl ? (
+                                      <Button
+                                        variant="outline"
+                                        className="justify-start h-12 rounded-xl bg-white border-primary/20 hover:bg-primary/5"
+                                        onClick={() =>
+                                          window.open(
+                                            profile.idDocumentUrl,
+                                            "_blank",
+                                          )
+                                        }
+                                      >
+                                        <FileText
+                                          className="mr-3 text-primary"
+                                          size={18}
+                                        />{" "}
+                                        View ID Document
+                                      </Button>
+                                    ) : (
+                                      <Button
+                                        disabled
+                                        variant="outline"
+                                        className="justify-start h-12 rounded-xl bg-gray-100"
+                                      >
+                                        <FileText
+                                          className="mr-3 text-gray-400"
+                                          size={18}
+                                        />{" "}
+                                        ID Document (Not Provided)
                                       </Button>
                                     )}
                                   </>

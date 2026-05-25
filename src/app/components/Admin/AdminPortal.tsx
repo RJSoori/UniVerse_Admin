@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import { cn } from "../ui/utils";
@@ -13,6 +13,12 @@ import { MarketplacePanel } from "./MarketplacePanel";
 export function AdminPortal() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [activeModule, setActiveModule] = useState<ModuleType>("jobhub");
+
+  // Restore authentication state from localStorage on mount
+  useEffect(() => {
+    const token = localStorage.getItem("adminToken");
+    if (token) setIsAuthenticated(true);
+  }, []);
 
   const handleLogin = async (email: string, pass: string) => {
     try {
@@ -69,7 +75,10 @@ export function AdminPortal() {
             <Button
               variant="outline"
               size="sm"
-              onClick={() => setIsAuthenticated(false)}
+              onClick={() => {
+                localStorage.removeItem("adminToken");
+                setIsAuthenticated(false);
+              }}
               className="rounded-xl font-bold"
             >
               <LogOut size={14} className="mr-2" /> Exit

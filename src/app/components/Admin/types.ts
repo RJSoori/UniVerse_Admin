@@ -21,6 +21,9 @@ export interface JobHubProfile extends BaseProfile {
     businessRegistrationUrl?: string;
     orgLogoUrl?: string;
     authLetterUrl?: string;
+    // For individuals
+    profilePictureUrl?: string;
+    idDocumentUrl?: string;
 }
 
 export interface SellerProfile extends BaseProfile {
