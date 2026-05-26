@@ -14,11 +14,15 @@ export function AdminPortal() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [activeModule, setActiveModule] = useState<ModuleType>("jobhub");
 
-  // Restore authentication state from localStorage on mount
   useEffect(() => {
     const token = localStorage.getItem("adminToken");
-    if (token) setIsAuthenticated(true);
+    setIsAuthenticated(Boolean(token));
   }, []);
+
+  const handleLogout = () => {
+    localStorage.removeItem("adminToken");
+    setIsAuthenticated(false);
+  };
 
   const handleLogin = async (email: string, pass: string) => {
     try {
@@ -34,7 +38,6 @@ export function AdminPortal() {
       });
       if (response.ok) {
         const data = await response.json();
-        // Store token if needed, but for now just set authenticated
         localStorage.setItem("adminToken", data.token);
         setIsAuthenticated(true);
       } else {
@@ -75,10 +78,7 @@ export function AdminPortal() {
             <Button
               variant="outline"
               size="sm"
-              onClick={() => {
-                localStorage.removeItem("adminToken");
-                setIsAuthenticated(false);
-              }}
+              onClick={handleLogout}
               className="rounded-xl font-bold"
             >
               <LogOut size={14} className="mr-2" /> Exit

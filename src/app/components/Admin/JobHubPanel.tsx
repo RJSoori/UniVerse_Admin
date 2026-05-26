@@ -54,7 +54,10 @@ const mapRecruiter = (recruiter: RawRecruiter): JobHubProfile => {
       ? new Date(recruiter.registeredAt).toLocaleDateString()
       : "Unknown",
     accountType,
-    url: "N/A",
+    url:
+      accountType === "corporate" && recruiter.businessRegistrationUrl
+        ? recruiter.businessRegistrationUrl
+        : "N/A",
     hqLocation: "Not provided",
     overview: recruiter.contactPerson
       ? `Contact person: ${recruiter.contactPerson}`
@@ -79,56 +82,53 @@ export function JobHubPanel() {
   const [reports, setReports] = useState<ReportedItem[]>([]);
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
-  useEffect(() => {
-    let isActive = true;
-    const fetchRecruiters = () => {
-      const token = localStorage.getItem("adminToken");
-      if (!token) return;
-      fetch("http://localhost:8080/api/jobs/recruiters", {
-        headers: { Authorization: `Bearer ${token}` },
-      })
-        .then((response) => {
-          if (!response.ok) {
-            throw new Error(`Failed to fetch recruiters: ${response.status}`);
-          }
-          return response.json();
-        })
-        .then((data: RawRecruiter[]) => {
-          if (!isActive) return;
-          setProfiles(data.map(mapRecruiter));
-        })
-        .catch((error) => {
-          console.error(error);
-        });
-    };
-
-    // Initial fetch
-    fetchRecruiters();
-    // Poll every 5 seconds for updates
-    const interval = setInterval(fetchRecruiters, 5000);
-    return () => {
-      isActive = false;
-      clearInterval(interval);
-    };
-  }, []);
-
-  useEffect(() => {
+  const fetchRecruiters = async () => {
     const token = localStorage.getItem("adminToken");
-    fetch("http://localhost:8080/api/jobs/admin/pending", {
-      headers: {
-        Authorization: `Bearer ${token}`,
-      },
-    })
-      .then((response) => {
-        if (!response.ok) {
-          throw new Error(`Failed to fetch jobs: ${response.status}`);
-        }
-        return response.json();
-      })
-      .then((data: JobItem[]) => setJobs(data))
-      .catch((error) => {
-        console.error(error);
-      });
+    try {
+      const response = await fetch(
+        "http://localhost:8080/api/jobs/recruiters",
+        {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        },
+      );
+      if (!response.ok) {
+        throw new Error(`Failed to fetch recruiters: ${response.status}`);
+      }
+      const data: RawRecruiter[] = await response.json();
+      setProfiles(data.map(mapRecruiter));
+    } catch (error) {
+      console.error(error);
+    }
+  };
+
+  const fetchJobs = async () => {
+    const token = localStorage.getItem("adminToken");
+    try {
+      const response = await fetch(
+        "http://localhost:8080/api/jobs/admin/pending",
+        {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        },
+      );
+      if (!response.ok) {
+        throw new Error(`Failed to fetch jobs: ${response.status}`);
+      }
+      const data: JobItem[] = await response.json();
+      setJobs(data);
+    } catch (error) {
+      console.error(error);
+    }
+  };
+
+  useEffect(() => {
+    fetchRecruiters();
+    fetchJobs();
+    const interval = setInterval(fetchRecruiters, 10000);
+    return () => clearInterval(interval);
   }, []);
 
   const pendingCount = profiles.filter((p) => p.status === "pending").length;
@@ -566,17 +566,16 @@ export function JobHubPanel() {
                                 <div className="font-medium">
                                   {profile.contactNo}
                                 </div>
-                                {profile.accountType === "corporate" &&
-                                  profile.url !== "N/A" && (
-                                    <>
-                                      <div className="text-muted-foreground">
-                                        Business URL:
-                                      </div>
-                                      <div className="font-medium text-primary hover:underline">
-                                        {profile.url}
-                                      </div>
-                                    </>
-                                  )}
+                                {profile.accountType === "corporate" && (
+                                  <>
+                                    <div className="text-muted-foreground">
+                                      Business URL:
+                                    </div>
+                                    <div className="font-medium text-primary hover:underline">
+                                      {profile.url}
+                                    </div>
+                                  </>
+                                )}
                                 <div className="text-muted-foreground">
                                   HQ Location:
                                 </div>
