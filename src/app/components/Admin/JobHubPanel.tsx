@@ -566,16 +566,6 @@ export function JobHubPanel() {
                                 <div className="font-medium">
                                   {profile.contactNo}
                                 </div>
-                                {profile.accountType === "corporate" && (
-                                  <>
-                                    <div className="text-muted-foreground">
-                                      Business URL:
-                                    </div>
-                                    <div className="font-medium text-primary hover:underline">
-                                      {profile.url}
-                                    </div>
-                                  </>
-                                )}
                                 <div className="text-muted-foreground">
                                   HQ Location:
                                 </div>
