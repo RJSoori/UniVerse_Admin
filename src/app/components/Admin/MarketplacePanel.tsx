@@ -7,26 +7,83 @@ import { cn } from "../ui/utils";
 import { CheckCircle2, UserCheck, AlertTriangle, Search, ChevronDown, FileText, Image as ImageIcon, Check, X } from "lucide-react";
 import type { TabType, SellerProfile, ReportedItem } from "./types";
 
+interface RawSeller {
+    id: number;
+    storeName: string;
+    email: string;
+    phone?: string;
+    description?: string;
+    status?: string;
+    registeredAt?: string;
+}
+
+const mapSeller = (seller: RawSeller): SellerProfile => {
+    const status = seller.status?.toLowerCase() as SellerProfile["status"];
+    return {
+        id: `${seller.id}`,
+        status: status === "verified" || status === "rejected" ? status : "pending",
+        legalName: seller.storeName || "Unknown Store",
+        email: seller.email,
+        submittedAt: seller.registeredAt
+            ? new Date(seller.registeredAt).toLocaleDateString()
+            : "Unknown",
+        shopName: seller.storeName,
+    };
+};
+
 export function MarketplacePanel() {
     const [activeTab, setActiveTab] = useState<TabType>("verifications");
     const [profiles, setProfiles] = useState<SellerProfile[]>([]);
     const [reports, setReports] = useState<ReportedItem[]>([]);
     const [expandedId, setExpandedId] = useState<string | null>(null);
 
-    // TODO: Fetch Marketplace data from API
+    const fetchSellers = async () => {
+        const token = localStorage.getItem("adminToken");
+        try {
+            const response = await fetch("http://localhost:8080/api/marketplace/sellers", {
+                headers: {
+                    Authorization: `Bearer ${token}`,
+                },
+            });
+            if (!response.ok) {
+                throw new Error(`Failed to fetch sellers: ${response.status}`);
+            }
+            const data: RawSeller[] = await response.json();
+            setProfiles(data.map(mapSeller));
+        } catch (error) {
+            console.error(error);
+        }
+    };
+
     useEffect(() => {
-        // Example: fetchSellerProfiles().then(setProfiles);
-        // Example: fetchAdReports().then(setReports);
+        fetchSellers();
     }, []);
 
     const pendingCount = profiles.filter(p => p.status === "pending").length;
     const verifiedCount = profiles.filter(p => p.status === "verified").length;
     const reportsCount = reports.filter(r => r.status === "open").length;
 
-    const updateStatus = (id: string, status: "pending" | "verified" | "rejected") => {
-        // TODO: Send update to API
-        setProfiles(prev => prev.map(p => p.id === id ? { ...p, status } : p));
-        setExpandedId(null);
+    const updateStatus = async (id: string, status: "pending" | "verified" | "rejected") => {
+        try {
+            const token = localStorage.getItem("adminToken");
+            const response = await fetch(
+                `http://localhost:8080/api/marketplace/sellers/${id}/verify?status=${status.toUpperCase()}`,
+                {
+                    method: "PUT",
+                    headers: {
+                        Authorization: `Bearer ${token}`,
+                    },
+                },
+            );
+            if (!response.ok) {
+                throw new Error(`Failed to update status: ${response.status}`);
+            }
+            setExpandedId(null);
+            await fetchSellers();
+        } catch (error) {
+            console.error(error);
+            alert("Unable to update seller status. Check the backend connection and try again.");
+        }
     };
 
     const handleResolveReport = (id: string) => {
