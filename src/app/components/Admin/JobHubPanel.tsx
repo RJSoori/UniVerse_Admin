@@ -8,6 +8,7 @@ import {
   CheckCircle2,
   UserCheck,
   AlertTriangle,
+  RefreshCw,
   Search,
   ChevronDown,
   FileText,
@@ -15,7 +16,7 @@ import {
   Check,
   X,
 } from "lucide-react";
-import type { TabType, JobHubProfile, ReportedItem, JobItem } from "./types";
+import type { TabType, JobHubProfile, ReportedItem } from "./types";
 
 interface RawRecruiter {
   id: number;
@@ -34,7 +35,13 @@ interface RawRecruiter {
 }
 
 const mapRecruiter = (recruiter: RawRecruiter): JobHubProfile => {
-  const status = recruiter.status?.toLowerCase() as JobHubProfile["status"];
+  // Recruiter.status is a Java enum name (e.g. "RE_VERIFICATION") - lowercasing keeps the
+  // underscore, so the literal here must be "re_verification", not "reverification".
+  const rawStatus = recruiter.status?.toLowerCase();
+  const status: JobHubProfile["status"] =
+    rawStatus === "verified" || rawStatus === "rejected" || rawStatus === "re_verification"
+      ? rawStatus
+      : "pending";
   const rawAccountType =
     recruiter.accountType ||
     (recruiter.businessRegistrationUrl ? "corporate" : "individual");
@@ -42,7 +49,7 @@ const mapRecruiter = (recruiter: RawRecruiter): JobHubProfile => {
     rawAccountType === "company" ? "corporate" : rawAccountType;
   return {
     id: `${recruiter.id}`,
-    status: status === "verified" || status === "rejected" ? status : "pending",
+    status,
     legalName:
       accountType === "individual"
         ? recruiter.contactPerson ||
@@ -78,7 +85,6 @@ const mapRecruiter = (recruiter: RawRecruiter): JobHubProfile => {
 export function JobHubPanel() {
   const [activeTab, setActiveTab] = useState<TabType>("verifications");
   const [profiles, setProfiles] = useState<JobHubProfile[]>([]);
-  const [jobs, setJobs] = useState<JobItem[]>([]);
   const [reports, setReports] = useState<ReportedItem[]>([]);
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
@@ -103,38 +109,25 @@ export function JobHubPanel() {
     }
   };
 
-  const fetchJobs = async () => {
-    const token = localStorage.getItem("adminToken");
-    try {
-      const response = await fetch(
-        "http://localhost:8080/api/jobs/admin/pending",
-        {
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
-        },
-      );
-      if (!response.ok) {
-        throw new Error(`Failed to fetch jobs: ${response.status}`);
-      }
-      const data: JobItem[] = await response.json();
-      setJobs(data);
-    } catch (error) {
-      console.error(error);
-    }
-  };
-
   useEffect(() => {
     fetchRecruiters();
-    fetchJobs();
     const interval = setInterval(fetchRecruiters, 10000);
     return () => clearInterval(interval);
   }, []);
 
   const pendingCount = profiles.filter((p) => p.status === "pending").length;
   const verifiedCount = profiles.filter((p) => p.status === "verified").length;
-  const jobsCount = jobs.length;
+  const reverificationCount = profiles.filter((p) => p.status === "re_verification").length;
   const reportsCount = reports.filter((r) => r.status === "open").length;
+
+  // Which profile status each of the profile-driven tabs shows - "reported" has its own
+  // dedicated block below and never matches a profile here.
+  const profileStatusForTab = (tab: TabType): JobHubProfile["status"] | null => {
+    if (tab === "verifications") return "pending";
+    if (tab === "registered") return "verified";
+    if (tab === "reverification") return "re_verification";
+    return null;
+  };
 
   const updateStatus = async (
     id: string,
@@ -192,58 +185,10 @@ export function JobHubPanel() {
     );
   };
 
-  const handleApproveJob = async (id: number) => {
-    try {
-      const token = localStorage.getItem("adminToken");
-      const response = await fetch(
-        `http://localhost:8080/api/jobs/admin/${id}/approve`,
-        {
-          method: "PUT",
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
-        },
-      );
-      if (!response.ok) {
-        throw new Error(`Failed to approve job: ${response.status}`);
-      }
-      setJobs((prev) => prev.filter((job) => job.id !== id));
-    } catch (error) {
-      console.error(error);
-      alert(
-        "Unable to approve job. Check the backend connection and try again.",
-      );
-    }
-  };
-
-  const handleRejectJob = async (id: number) => {
-    try {
-      const token = localStorage.getItem("adminToken");
-      const response = await fetch(
-        `http://localhost:8080/api/jobs/admin/${id}/reject`,
-        {
-          method: "PUT",
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
-        },
-      );
-      if (!response.ok) {
-        throw new Error(`Failed to reject job: ${response.status}`);
-      }
-      setJobs((prev) => prev.filter((job) => job.id !== id));
-    } catch (error) {
-      console.error(error);
-      alert(
-        "Unable to reject job. Check the backend connection and try again.",
-      );
-    }
-  };
-
   return (
     <div className="space-y-6">
       {/* Stats Tabs */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
         <Card
           className={cn(
             "cursor-pointer transition-all hover:border-primary/50",
@@ -286,19 +231,20 @@ export function JobHubPanel() {
         <Card
           className={cn(
             "cursor-pointer transition-all hover:border-primary/50",
-            activeTab === "jobs" && "border-primary ring-1 ring-primary",
+            activeTab === "reverification" &&
+              "border-primary ring-1 ring-primary",
           )}
-          onClick={() => setActiveTab("jobs")}
+          onClick={() => setActiveTab("reverification")}
         >
           <CardContent className="p-6 flex items-center gap-4">
-            <div className="p-3 rounded-xl bg-blue-50">
-              <FileText className="text-blue-500" size={24} />
+            <div className="p-3 rounded-xl bg-amber-50">
+              <RefreshCw className="text-amber-500" size={24} />
             </div>
             <div>
               <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest">
-                Pending Jobs
+                Re-verification Requests
               </p>
-              <p className="text-3xl font-black">{jobsCount}</p>
+              <p className="text-3xl font-black">{reverificationCount}</p>
             </div>
           </CardContent>
         </Card>
@@ -401,92 +347,17 @@ export function JobHubPanel() {
                 ))
             ))}
 
-          {/* Render Jobs */}
-          {activeTab === "jobs" &&
-            (jobs.length === 0 ? (
-              <div className="text-center text-muted-foreground py-10 font-medium">
-                No pending jobs for review.
-              </div>
-            ) : (
-              jobs.map((job) => (
-                <div
-                  key={job.id}
-                  className="border border-blue-100 bg-blue-50/30 rounded-xl p-4 flex justify-between items-start"
-                >
-                  <div className="flex-1">
-                    <div className="flex items-center gap-2 mb-2">
-                      <Badge
-                        variant="secondary"
-                        className="text-[10px] uppercase font-bold"
-                      >
-                        Job #{job.id}
-                      </Badge>
-                      <span className="font-bold text-foreground">
-                        {job.title}
-                      </span>
-                    </div>
-                    <p className="text-sm text-muted-foreground mb-2">
-                      {job.description}
-                    </p>
-                    <p className="text-xs text-muted-foreground">
-                      Posted by {job.recruiter.companyName} (
-                      {job.recruiter.email})
-                    </p>
-                    <p className="text-xs text-muted-foreground">
-                      Application URL: {job.externalApplicationUrl}
-                    </p>
-                  </div>
-                  <div className="flex gap-2 ml-4">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="rounded-xl"
-                      onClick={() =>
-                        window.open(job.externalApplicationUrl, "_blank")
-                      }
-                    >
-                      View Application
-                    </Button>
-                    <Button
-                      variant="default"
-                      size="sm"
-                      className="rounded-xl bg-green-600 hover:bg-green-700"
-                      onClick={() => handleApproveJob(job.id)}
-                    >
-                      <Check className="w-4 h-4 mr-1" />
-                      Approve
-                    </Button>
-                    <Button
-                      variant="destructive"
-                      size="sm"
-                      className="rounded-xl"
-                      onClick={() => handleRejectJob(job.id)}
-                    >
-                      <X className="w-4 h-4 mr-1" />
-                      Reject
-                    </Button>
-                  </div>
-                </div>
-              ))
-            ))}
-
-          {/* Render Profiles */}
+          {/* Render Profiles - "reported" has its own dedicated block above and never matches
+              a profile status, so it's excluded here rather than falling through to an
+              incorrect default. */}
           {activeTab !== "reported" &&
-            (profiles.filter((p) =>
-              activeTab === "verifications"
-                ? p.status === "pending"
-                : p.status === "verified",
-            ).length === 0 ? (
+            (profiles.filter((p) => p.status === profileStatusForTab(activeTab)).length === 0 ? (
               <div className="text-center text-muted-foreground py-10 font-medium">
                 No records found for this category.
               </div>
             ) : (
               profiles
-                .filter((p) =>
-                  activeTab === "verifications"
-                    ? p.status === "pending"
-                    : p.status === "verified",
-                )
+                .filter((p) => p.status === profileStatusForTab(activeTab))
                 .map((profile) => {
                   const isExpanded = expandedId === profile.id;
                   return (
@@ -528,6 +399,11 @@ export function JobHubPanel() {
                           {activeTab === "registered" && (
                             <Badge className="bg-green-100 text-green-700 hover:bg-green-100">
                               Verified
+                            </Badge>
+                          )}
+                          {activeTab === "reverification" && (
+                            <Badge className="bg-amber-100 text-amber-700 hover:bg-amber-100">
+                              Re-verification
                             </Badge>
                           )}
                           <ChevronDown
@@ -768,7 +644,7 @@ export function JobHubPanel() {
                               </div>
                             </div>
                           </div>
-                          {activeTab === "verifications" && (
+                          {(activeTab === "verifications" || activeTab === "reverification") && (
                             <div className="flex justify-end gap-3 mt-8 pt-4 border-t border-border/50">
                               <Button
                                 variant="outline"
