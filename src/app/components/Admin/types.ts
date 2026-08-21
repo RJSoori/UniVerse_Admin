@@ -1,6 +1,6 @@
 export type AccountStatus = "pending" | "verified" | "rejected";
 export type ModuleType = "jobhub" | "marketplace";
-export type TabType = "verifications" | "registered" | "jobs" | "listings" | "reported" | "reverifications";
+export type TabType = "verifications" | "registered" | "reverification" | "reported" | "listings" | "reverifications";
 
 export interface BaseProfile {
     id: string;
@@ -10,7 +10,14 @@ export interface BaseProfile {
     submittedAt: string;
 }
 
-export interface JobHubProfile extends BaseProfile {
+// Recruiters have a 4th status - VERIFIED accounts that edited their profile/documents and
+// need re-approval - that plain sellers/marketplace accounts don't. Kept separate from the
+// shared AccountStatus/BaseProfile (which SellerProfile also extends) rather than widening
+// those, so a marketplace seller can never admit this recruiter-only literal.
+export type JobHubStatus = AccountStatus | "re_verification";
+
+export interface JobHubProfile extends Omit<BaseProfile, "status"> {
+    status: JobHubStatus;
     accountType: "corporate" | "individual";
     url: string;
     hqLocation: string;

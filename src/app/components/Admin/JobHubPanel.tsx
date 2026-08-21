@@ -8,14 +8,56 @@ import {
   CheckCircle2,
   UserCheck,
   AlertTriangle,
+  RefreshCw,
   Search,
   ChevronDown,
   FileText,
   Image as ImageIcon,
   Check,
   X,
+  Ban,
+  ShieldAlert,
 } from "lucide-react";
-import type { TabType, JobHubProfile, ReportedItem, JobItem } from "./types";
+import type { TabType, JobHubProfile } from "./types";
+
+interface RawReportedRecruiter {
+  id: number;
+  companyName?: string;
+  email?: string;
+  contactPerson?: string;
+}
+
+interface RawReportedJob {
+  id: number;
+  title: string;
+  description?: string;
+  requirements?: string;
+  skills?: string;
+  salaryInfo?: string;
+  workType?: string;
+  employmentType?: string;
+  postedAt?: string;
+  active: boolean;
+  underReview: boolean;
+  blocked: boolean;
+  recruiter?: RawReportedRecruiter;
+}
+
+// One row per student report - a single job can carry several of these before an admin acts,
+// which is why the UI below groups them by job rather than rendering one row per report.
+interface RawJobReport {
+  id: number;
+  job: RawReportedJob;
+  reportedByStudentId: number;
+  reason: string;
+  reportedAt: string;
+  resolved: boolean;
+}
+
+interface ReportedJobGroup {
+  job: RawReportedJob;
+  reports: RawJobReport[];
+}
 
 interface RawRecruiter {
   id: number;
@@ -34,7 +76,13 @@ interface RawRecruiter {
 }
 
 const mapRecruiter = (recruiter: RawRecruiter): JobHubProfile => {
-  const status = recruiter.status?.toLowerCase() as JobHubProfile["status"];
+  // Recruiter.status is a Java enum name (e.g. "RE_VERIFICATION") - lowercasing keeps the
+  // underscore, so the literal here must be "re_verification", not "reverification".
+  const rawStatus = recruiter.status?.toLowerCase();
+  const status: JobHubProfile["status"] =
+    rawStatus === "verified" || rawStatus === "rejected" || rawStatus === "re_verification"
+      ? rawStatus
+      : "pending";
   const rawAccountType =
     recruiter.accountType ||
     (recruiter.businessRegistrationUrl ? "corporate" : "individual");
@@ -42,7 +90,7 @@ const mapRecruiter = (recruiter: RawRecruiter): JobHubProfile => {
     rawAccountType === "company" ? "corporate" : rawAccountType;
   return {
     id: `${recruiter.id}`,
-    status: status === "verified" || status === "rejected" ? status : "pending",
+    status,
     legalName:
       accountType === "individual"
         ? recruiter.contactPerson ||
@@ -78,8 +126,7 @@ const mapRecruiter = (recruiter: RawRecruiter): JobHubProfile => {
 export function JobHubPanel() {
   const [activeTab, setActiveTab] = useState<TabType>("verifications");
   const [profiles, setProfiles] = useState<JobHubProfile[]>([]);
-  const [jobs, setJobs] = useState<JobItem[]>([]);
-  const [reports, setReports] = useState<ReportedItem[]>([]);
+  const [jobReports, setJobReports] = useState<RawJobReport[]>([]);
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
   const fetchRecruiters = async () => {
@@ -103,11 +150,11 @@ export function JobHubPanel() {
     }
   };
 
-  const fetchJobs = async () => {
+  const fetchReportedJobs = async () => {
     const token = localStorage.getItem("adminToken");
     try {
       const response = await fetch(
-        "http://localhost:8080/api/jobs/admin/pending",
+        "http://localhost:8080/api/jobs/admin/reported",
         {
           headers: {
             Authorization: `Bearer ${token}`,
@@ -115,10 +162,10 @@ export function JobHubPanel() {
         },
       );
       if (!response.ok) {
-        throw new Error(`Failed to fetch jobs: ${response.status}`);
+        throw new Error(`Failed to fetch reported jobs: ${response.status}`);
       }
-      const data: JobItem[] = await response.json();
-      setJobs(data);
+      const data: RawJobReport[] = await response.json();
+      setJobReports(data);
     } catch (error) {
       console.error(error);
     }
@@ -126,15 +173,39 @@ export function JobHubPanel() {
 
   useEffect(() => {
     fetchRecruiters();
-    fetchJobs();
-    const interval = setInterval(fetchRecruiters, 10000);
+    fetchReportedJobs();
+    const interval = setInterval(() => {
+      fetchRecruiters();
+      fetchReportedJobs();
+    }, 10000);
     return () => clearInterval(interval);
   }, []);
 
+  // Group individual report rows by the job they're against - a job can be reported by
+  // several students before an admin acts, and the UI shows one expandable row per job.
+  const reportedGroups: ReportedJobGroup[] = [];
+  for (const report of jobReports) {
+    const existing = reportedGroups.find((g) => g.job.id === report.job.id);
+    if (existing) {
+      existing.reports.push(report);
+    } else {
+      reportedGroups.push({ job: report.job, reports: [report] });
+    }
+  }
+
   const pendingCount = profiles.filter((p) => p.status === "pending").length;
   const verifiedCount = profiles.filter((p) => p.status === "verified").length;
-  const jobsCount = jobs.length;
-  const reportsCount = reports.filter((r) => r.status === "open").length;
+  const reverificationCount = profiles.filter((p) => p.status === "re_verification").length;
+  const reportsCount = reportedGroups.length;
+
+  // Which profile status each of the profile-driven tabs shows - "reported" has its own
+  // dedicated block below and never matches a profile here.
+  const profileStatusForTab = (tab: TabType): JobHubProfile["status"] | null => {
+    if (tab === "verifications") return "pending";
+    if (tab === "registered") return "verified";
+    if (tab === "reverification") return "re_verification";
+    return null;
+  };
 
   const updateStatus = async (
     id: string,
@@ -185,18 +256,11 @@ export function JobHubPanel() {
     }
   };
 
-  const handleResolveReport = (id: string) => {
-    // TODO: Send resolution to API
-    setReports((prev) =>
-      prev.map((r) => (r.id === id ? { ...r, status: "resolved" } : r)),
-    );
-  };
-
-  const handleApproveJob = async (id: number) => {
+  const handleDismissReport = async (jobId: number) => {
     try {
       const token = localStorage.getItem("adminToken");
       const response = await fetch(
-        `http://localhost:8080/api/jobs/admin/${id}/approve`,
+        `http://localhost:8080/api/jobs/admin/${jobId}/dismiss-report`,
         {
           method: "PUT",
           headers: {
@@ -205,22 +269,25 @@ export function JobHubPanel() {
         },
       );
       if (!response.ok) {
-        throw new Error(`Failed to approve job: ${response.status}`);
+        throw new Error(`Failed to dismiss report: ${response.status}`);
       }
-      setJobs((prev) => prev.filter((job) => job.id !== id));
+      // Dismissed reports are resolved server-side, so they drop out of the unresolved list -
+      // just remove this job's rows locally rather than waiting for the next poll.
+      setJobReports((prev) => prev.filter((r) => r.job.id !== jobId));
+      setExpandedId(null);
     } catch (error) {
       console.error(error);
       alert(
-        "Unable to approve job. Check the backend connection and try again.",
+        "Unable to dismiss the report. Check the backend connection and try again.",
       );
     }
   };
 
-  const handleRejectJob = async (id: number) => {
+  const handleBlockJob = async (jobId: number) => {
     try {
       const token = localStorage.getItem("adminToken");
       const response = await fetch(
-        `http://localhost:8080/api/jobs/admin/${id}/reject`,
+        `http://localhost:8080/api/jobs/admin/${jobId}/block`,
         {
           method: "PUT",
           headers: {
@@ -229,13 +296,14 @@ export function JobHubPanel() {
         },
       );
       if (!response.ok) {
-        throw new Error(`Failed to reject job: ${response.status}`);
+        throw new Error(`Failed to block posting: ${response.status}`);
       }
-      setJobs((prev) => prev.filter((job) => job.id !== id));
+      setJobReports((prev) => prev.filter((r) => r.job.id !== jobId));
+      setExpandedId(null);
     } catch (error) {
       console.error(error);
       alert(
-        "Unable to reject job. Check the backend connection and try again.",
+        "Unable to block the posting. Check the backend connection and try again.",
       );
     }
   };
@@ -243,7 +311,7 @@ export function JobHubPanel() {
   return (
     <div className="space-y-6">
       {/* Stats Tabs */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
         <Card
           className={cn(
             "cursor-pointer transition-all hover:border-primary/50",
@@ -286,19 +354,20 @@ export function JobHubPanel() {
         <Card
           className={cn(
             "cursor-pointer transition-all hover:border-primary/50",
-            activeTab === "jobs" && "border-primary ring-1 ring-primary",
+            activeTab === "reverification" &&
+              "border-primary ring-1 ring-primary",
           )}
-          onClick={() => setActiveTab("jobs")}
+          onClick={() => setActiveTab("reverification")}
         >
           <CardContent className="p-6 flex items-center gap-4">
-            <div className="p-3 rounded-xl bg-blue-50">
-              <FileText className="text-blue-500" size={24} />
+            <div className="p-3 rounded-xl bg-amber-50">
+              <RefreshCw className="text-amber-500" size={24} />
             </div>
             <div>
               <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest">
-                Pending Jobs
+                Re-verification Requests
               </p>
-              <p className="text-3xl font-black">{jobsCount}</p>
+              <p className="text-3xl font-black">{reverificationCount}</p>
             </div>
           </CardContent>
         </Card>
@@ -344,149 +413,164 @@ export function JobHubPanel() {
         </div>
 
         <div className="space-y-4">
-          {/* Render Reports */}
+          {/* Render Reported Jobs - grouped by posting, each expandable to the full posting
+              detail plus every report filed against it. */}
           {activeTab === "reported" &&
-            (reports.length === 0 ? (
+            (reportedGroups.length === 0 ? (
               <div className="text-center text-muted-foreground py-10 font-medium">
-                No reported items pending review.
+                No reported jobs pending review.
               </div>
             ) : (
-              reports
-                .filter((r) => r.status === "open")
-                .map((report) => (
+              reportedGroups.map(({ job, reports: jobReportRows }) => {
+                const rowId = `job-${job.id}`;
+                const isExpanded = expandedId === rowId;
+                const latestReport = jobReportRows.reduce((latest, r) =>
+                  new Date(r.reportedAt) > new Date(latest.reportedAt) ? r : latest,
+                );
+                return (
                   <div
-                    key={report.id}
-                    className="border border-red-100 bg-red-50/30 rounded-xl p-4 flex justify-between items-center"
+                    key={rowId}
+                    className={cn(
+                      "border rounded-xl transition-all overflow-hidden",
+                      isExpanded
+                        ? "border-destructive shadow-md"
+                        : "border-red-100 hover:border-destructive/40",
+                    )}
                   >
-                    <div>
-                      <div className="flex items-center gap-2 mb-1">
-                        <Badge
-                          variant="destructive"
-                          className="text-[10px] uppercase font-bold"
-                        >
-                          {report.id}
-                        </Badge>
-                        <span className="font-bold text-foreground">
-                          {report.title}
-                        </span>
+                    <div
+                      className="bg-red-50/30 p-4 flex items-center justify-between cursor-pointer"
+                      onClick={() => setExpandedId(isExpanded ? null : rowId)}
+                    >
+                      <div className="flex items-center gap-4">
+                        <div className="size-10 bg-destructive/10 text-destructive rounded-lg flex items-center justify-center">
+                          <AlertTriangle size={18} />
+                        </div>
+                        <div>
+                          <h3 className="font-bold text-foreground flex items-center gap-2">
+                            {job.title}
+                            <Badge
+                              variant="destructive"
+                              className="text-[10px] uppercase font-bold"
+                            >
+                              {jobReportRows.length} report
+                              {jobReportRows.length === 1 ? "" : "s"}
+                            </Badge>
+                          </h3>
+                          <p className="text-xs text-muted-foreground">
+                            {job.recruiter?.companyName || "Unknown recruiter"} • Latest report:{" "}
+                            {new Date(latestReport.reportedAt).toLocaleString()}
+                          </p>
+                        </div>
                       </div>
-                      <p className="text-sm text-muted-foreground">
-                        <span className="font-bold text-red-600/80">
-                          Reason:
-                        </span>{" "}
-                        {report.reason}
-                      </p>
-                      <p className="text-xs text-muted-foreground mt-1">
-                        Reported by {report.reportedBy} on {report.date}
-                      </p>
+                      <ChevronDown
+                        className={cn(
+                          "text-muted-foreground transition-transform",
+                          isExpanded ? "rotate-180" : "",
+                        )}
+                        size={20}
+                      />
                     </div>
-                    <div className="flex gap-2">
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        className="rounded-xl"
-                      >
-                        View Original
-                      </Button>
-                      <Button
-                        variant="destructive"
-                        size="sm"
-                        className="rounded-xl"
-                        onClick={() => handleResolveReport(report.id)}
-                      >
-                        Take Down
-                      </Button>
-                    </div>
+
+                    {isExpanded && (
+                      <div className="p-6 bg-slate-50/50 border-t border-border/50">
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                          <div className="space-y-4">
+                            <h4 className="text-sm font-bold tracking-widest uppercase text-muted-foreground flex items-center gap-2">
+                              <FileText size={16} /> Job Posting Details
+                            </h4>
+                            <div className="grid grid-cols-2 gap-y-3 gap-x-4 text-sm">
+                              <div className="text-muted-foreground">Title:</div>
+                              <div className="font-medium">{job.title}</div>
+                              <div className="text-muted-foreground">Recruiter:</div>
+                              <div className="font-medium">
+                                {job.recruiter?.companyName || "Unknown"}
+                                {job.recruiter?.email ? ` (${job.recruiter.email})` : ""}
+                              </div>
+                              <div className="text-muted-foreground">Work Type:</div>
+                              <div className="font-medium">{job.workType || "N/A"}</div>
+                              <div className="text-muted-foreground">Employment:</div>
+                              <div className="font-medium">{job.employmentType || "N/A"}</div>
+                              <div className="text-muted-foreground">Salary:</div>
+                              <div className="font-medium">{job.salaryInfo || "N/A"}</div>
+                              <div className="text-muted-foreground">Posted:</div>
+                              <div className="font-medium">{job.postedAt || "N/A"}</div>
+                              <div className="text-muted-foreground">Skills:</div>
+                              <div className="font-medium">{job.skills || "N/A"}</div>
+                              <div className="text-muted-foreground col-span-2 mt-2">
+                                Description:
+                              </div>
+                              <div className="font-medium col-span-2 bg-white p-3 rounded-lg border border-border/50 whitespace-pre-wrap">
+                                {job.description || "No description provided."}
+                              </div>
+                              <div className="text-muted-foreground col-span-2 mt-2">
+                                Requirements:
+                              </div>
+                              <div className="font-medium col-span-2 bg-white p-3 rounded-lg border border-border/50 whitespace-pre-wrap">
+                                {job.requirements || "No requirements provided."}
+                              </div>
+                            </div>
+                          </div>
+                          <div className="space-y-4">
+                            <h4 className="text-sm font-bold tracking-widest uppercase text-muted-foreground flex items-center gap-2">
+                              <ShieldAlert size={16} /> Reports ({jobReportRows.length})
+                            </h4>
+                            <div className="flex flex-col gap-3">
+                              {jobReportRows
+                                .slice()
+                                .sort(
+                                  (a, b) =>
+                                    new Date(b.reportedAt).getTime() -
+                                    new Date(a.reportedAt).getTime(),
+                                )
+                                .map((r) => (
+                                  <div
+                                    key={r.id}
+                                    className="bg-white border border-border/50 rounded-lg p-3"
+                                  >
+                                    <p className="text-xs text-muted-foreground mb-1">
+                                      Student #{r.reportedByStudentId} •{" "}
+                                      {new Date(r.reportedAt).toLocaleString()}
+                                    </p>
+                                    <p className="text-sm font-medium">{r.reason}</p>
+                                  </div>
+                                ))}
+                            </div>
+                          </div>
+                        </div>
+                        <div className="flex justify-end gap-3 mt-8 pt-4 border-t border-border/50">
+                          <Button
+                            variant="outline"
+                            className="rounded-xl"
+                            onClick={() => handleDismissReport(job.id)}
+                          >
+                            <Check size={16} className="mr-2" /> Dismiss Report
+                          </Button>
+                          <Button
+                            variant="destructive"
+                            className="rounded-xl"
+                            onClick={() => handleBlockJob(job.id)}
+                          >
+                            <Ban size={16} className="mr-2" /> Block Posting
+                          </Button>
+                        </div>
+                      </div>
+                    )}
                   </div>
-                ))
+                );
+              })
             ))}
 
-          {/* Render Jobs */}
-          {activeTab === "jobs" &&
-            (jobs.length === 0 ? (
-              <div className="text-center text-muted-foreground py-10 font-medium">
-                No pending jobs for review.
-              </div>
-            ) : (
-              jobs.map((job) => (
-                <div
-                  key={job.id}
-                  className="border border-blue-100 bg-blue-50/30 rounded-xl p-4 flex justify-between items-start"
-                >
-                  <div className="flex-1">
-                    <div className="flex items-center gap-2 mb-2">
-                      <Badge
-                        variant="secondary"
-                        className="text-[10px] uppercase font-bold"
-                      >
-                        Job #{job.id}
-                      </Badge>
-                      <span className="font-bold text-foreground">
-                        {job.title}
-                      </span>
-                    </div>
-                    <p className="text-sm text-muted-foreground mb-2">
-                      {job.description}
-                    </p>
-                    <p className="text-xs text-muted-foreground">
-                      Posted by {job.recruiter.companyName} (
-                      {job.recruiter.email})
-                    </p>
-                    <p className="text-xs text-muted-foreground">
-                      Application URL: {job.externalApplicationUrl}
-                    </p>
-                  </div>
-                  <div className="flex gap-2 ml-4">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="rounded-xl"
-                      onClick={() =>
-                        window.open(job.externalApplicationUrl, "_blank")
-                      }
-                    >
-                      View Application
-                    </Button>
-                    <Button
-                      variant="default"
-                      size="sm"
-                      className="rounded-xl bg-green-600 hover:bg-green-700"
-                      onClick={() => handleApproveJob(job.id)}
-                    >
-                      <Check className="w-4 h-4 mr-1" />
-                      Approve
-                    </Button>
-                    <Button
-                      variant="destructive"
-                      size="sm"
-                      className="rounded-xl"
-                      onClick={() => handleRejectJob(job.id)}
-                    >
-                      <X className="w-4 h-4 mr-1" />
-                      Reject
-                    </Button>
-                  </div>
-                </div>
-              ))
-            ))}
-
-          {/* Render Profiles */}
+          {/* Render Profiles - "reported" has its own dedicated block above and never matches
+              a profile status, so it's excluded here rather than falling through to an
+              incorrect default. */}
           {activeTab !== "reported" &&
-            (profiles.filter((p) =>
-              activeTab === "verifications"
-                ? p.status === "pending"
-                : p.status === "verified",
-            ).length === 0 ? (
+            (profiles.filter((p) => p.status === profileStatusForTab(activeTab)).length === 0 ? (
               <div className="text-center text-muted-foreground py-10 font-medium">
                 No records found for this category.
               </div>
             ) : (
               profiles
-                .filter((p) =>
-                  activeTab === "verifications"
-                    ? p.status === "pending"
-                    : p.status === "verified",
-                )
+                .filter((p) => p.status === profileStatusForTab(activeTab))
                 .map((profile) => {
                   const isExpanded = expandedId === profile.id;
                   return (
@@ -528,6 +612,11 @@ export function JobHubPanel() {
                           {activeTab === "registered" && (
                             <Badge className="bg-green-100 text-green-700 hover:bg-green-100">
                               Verified
+                            </Badge>
+                          )}
+                          {activeTab === "reverification" && (
+                            <Badge className="bg-amber-100 text-amber-700 hover:bg-amber-100">
+                              Re-verification
                             </Badge>
                           )}
                           <ChevronDown
@@ -768,7 +857,7 @@ export function JobHubPanel() {
                               </div>
                             </div>
                           </div>
-                          {activeTab === "verifications" && (
+                          {(activeTab === "verifications" || activeTab === "reverification") && (
                             <div className="flex justify-end gap-3 mt-8 pt-4 border-t border-border/50">
                               <Button
                                 variant="outline"
