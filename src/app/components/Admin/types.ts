@@ -1,6 +1,6 @@
 export type AccountStatus = "pending" | "verified" | "rejected";
 export type ModuleType = "jobhub" | "marketplace";
-export type TabType = "verifications" | "registered" | "jobs" | "reported";
+export type TabType = "verifications" | "registered" | "jobs" | "listings" | "reported" | "reverifications";
 
 export interface BaseProfile {
     id: string;
@@ -28,6 +28,11 @@ export interface JobHubProfile extends BaseProfile {
 
 export interface SellerProfile extends BaseProfile {
     shopName: string;
+    identityDocumentUrl?: string;
+    shopLogoUrl?: string;
+    proofOfItemsUrl?: string;
+    warningCount?: number;
+    banned?: boolean;
 }
 
 export interface ReportedItem {
@@ -37,7 +42,7 @@ export interface ReportedItem {
     reportedBy: string;
     reason: string;
     date: string;
-    status: "open" | "resolved";
+    status: "open" | "resolved" | "dismissed";
 }
 
 export interface JobItem {
@@ -51,4 +56,30 @@ export interface JobItem {
         email: string;
     };
     status: "PENDING" | "APPROVED" | "REJECTED";
+}
+
+export interface SellerReverificationRequest {
+    id: string;
+    sellerId: number;
+    storeName: string;
+    email: string;
+    reason: string;
+    status: "open" | "resolved";
+    date: string;
+}
+
+export interface MarketplaceListing {
+    id: number;
+    itemName: string;
+    description: string;
+    price: number;
+    type: "SELL" | "RENT";
+    condition: string;
+    status: string;
+    imageUrl?: string;
+    seller: {
+        id: number;
+        storeName: string;
+        email: string;
+    };
 }
