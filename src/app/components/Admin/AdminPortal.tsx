@@ -1,5 +1,4 @@
 import { useState, useEffect } from "react";
-import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import { cn } from "../ui/utils";
 import { ShieldCheck, LogOut, Briefcase, Store } from "lucide-react";
@@ -72,9 +71,6 @@ export function AdminPortal() {
             </div>
           </div>
           <div className="flex items-center gap-3">
-            <Badge className="bg-primary/10 text-primary border-primary/20 px-3 py-1 font-bold">
-              LIVE ADMIN SESSION
-            </Badge>
             <Button
               variant="outline"
               size="sm"
